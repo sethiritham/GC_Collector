@@ -102,6 +102,22 @@ char* m_allocate(size_t size)
   return (char*)current + sizeof(memID);
 }
 
+void m_free(char* ptr)
+{
+  memID *ptr_id = (memID*)(ptr - sizeof(memID));
+  memID *next_id = (memID*)(ptr + sizeof(memID));
+
+  ptr_id->is_free = 1;
+
+  if(next_id->is_free)
+  {
+    ptr_id->size = ptr_id->size + next_id->size + sizeof(memID);
+    return;
+  }
+
+}
+
+
 int main()
 {
   char* ptr = m_allocate(425);
@@ -110,7 +126,11 @@ int main()
   char x = 'A';
   ptr = &x;
 
-  std::cout<<"SUCESSFULLY ALLOCATED MEMORY "<<"\nVALUE OF VARIABLE IS "<<x<<std::endl;
-  return 0;
-}
+  char y = 'B';
+  ptr2 = &y;
 
+  m_free(ptr);
+
+  std::cout<<"SUCESSFULLY ALLOCATED MEMORY "<<"\nVALUE OF VARIABLE IS "<<*ptr<<" AND y = "<<*ptr2<<std::endl;
+  return 0; 
+}
