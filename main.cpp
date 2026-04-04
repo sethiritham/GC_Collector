@@ -1,6 +1,7 @@
 #include <sys/mman.h>
 #include <list>
 #include<cstdint>
+#include<pthread.h>
 #include<iostream>
 
 char* heap_ptr = (char*)mmap(nullptr, 65536, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
@@ -9,9 +10,12 @@ typedef struct memID
 {
     size_t size;
     bool is_free = 0;
+    bool is_marked = 0;
 } memID;
 
 memID* free_list_head = (memID*)heap_ptr;
+void* heap_start = (void*)heap_ptr;
+void* heap_end = (void*)(heap_start + 65536);
 static int called = 0;
 
 char* m_allocate(size_t size)
@@ -105,7 +109,7 @@ char* m_allocate(size_t size)
 void m_free(char* ptr)
 {
   memID *ptr_id = (memID*)(ptr - sizeof(memID));
-  memID *next_id = (memID*)(ptr + sizeof(memID));
+  memID *next_id = (memID*)(ptr + ptr_id->size + sizeof(memID));
 
   ptr_id->is_free = 1;
 
@@ -117,6 +121,68 @@ void m_free(char* ptr)
 
 }
 
+void get_stack_bounds(void **stack_top)
+{
+  pthread_t self =  pthread_self();
+  pthread_attr_t attr;
+  void* addr;
+  size_t size;
+
+  pthread_getattr_np(self, &attr);
+  pthread_attr_getstack(&attr, &addr, &size);
+  pthread_attr_destroy(&attr);
+
+  *stack_top = (void*)((char*)addr + size);
+
+}
+
+void* get_current_sp()
+{
+  return (__builtin_frame_address(0));
+}
+
+bool looks_like_pointer(void* pointer)
+{
+  if(pointer <= heap_end && pointer >= heap_start) return true;
+
+  return false;
+}
+
+void traverse_mark(memID* ptr_id)
+{
+
+  if(ptr_id->is_free || ptr_id->is_marked) return;
+
+  void* ptr_payload = (void*)((char*)ptr_id + sizeof(memID));
+  
+  ptr_id->is_marked = 1;
+
+  void** payload = (void**)(ptr_payload);
+  size_t count = (ptr_id->size/sizeof(void*));
+
+  for(size_t i = 0; i < count; i++)
+  {
+    if(looks_like_pointer(payload[i])) traverse_mark((memID*)((char*)payload[i] - sizeof(memID)));
+  }
+}
+
+void mark_algo()
+{
+  void* current_sp = get_current_sp();
+  void* stack_top;
+  get_stack_bounds(&stack_top);
+
+  for(void** sp = (void**)current_sp; sp < (void**)stack_top; ++sp)
+  {
+    if(looks_like_pointer(*sp))
+    {
+      memID* ptr_id = *sp - sizeof(memID);
+      if(ptr_id->is_free || ptr_id->is_marked) continue;
+      
+      traverse_mark((memID*)((char*)*sp - sizeof(memID)));      
+    }
+  }
+}
 
 int main()
 {
