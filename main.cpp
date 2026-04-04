@@ -162,12 +162,18 @@ void traverse_mark(memID* ptr_id)
 
   for(size_t i = 0; i < count; i++)
   {
-    if(looks_like_pointer(payload[i])) traverse_mark((memID*)((char*)payload[i] - sizeof(memID)));
+    memID* candidate_id = (memID*)((char*)payload[i] - sizeof(memID));
+    if(looks_like_pointer(payload[i]))
+    {
+      if(!candidate_id->is_free) traverse_mark(candidate_id);
+    }
   }
 }
 
 void mark_algo()
 {
+  asm volatile("" ::: "memory"); //flushing registers 
+
   void* current_sp = get_current_sp();
   void* stack_top;
   get_stack_bounds(&stack_top);
@@ -176,10 +182,10 @@ void mark_algo()
   {
     if(looks_like_pointer(*sp))
     {
-      memID* ptr_id = *sp - sizeof(memID);
+      memID* ptr_id = (memID*)((char*)*sp - sizeof(memID));
       if(ptr_id->is_free || ptr_id->is_marked) continue;
-      
-      traverse_mark((memID*)((char*)*sp - sizeof(memID)));      
+
+      traverse_mark(ptr_id);      
     }
   }
 }
