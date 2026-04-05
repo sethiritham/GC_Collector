@@ -190,10 +190,21 @@ void mark_algo()
   }
 }
 
+void coalasce(memID* id)
+{
+  next_id = (memID*)((char*)id + id->size + sizeof(size));
+  if((void*)next_id < heap_end && next_id->is_free)
+  {
+    id->size = id->size + next_id->size + sizeof(memID);
+    coalasce(id);
+  }
+}
+
 void sweep_algo()
 {
   memID* prev_id = nullptr;
   memID* current_id = (memID*)heap_start;
+  free_list_head = nullptr;
   
   while((void*)current_id < heap_end)
   {
@@ -209,15 +220,31 @@ void sweep_algo()
     current_id->is_marked = 0;
     current_id->is_free = 1;
 
-    if(next_id->is_free) current_id->size += next_id->size;
-    if(prev_id == nullptr) free_list_head = current_id; continue;
+    coalasce(current_id);
+
+    if(prev_id == nullptr) 
+    {
+      free_list_head = current_id;
+
+      prev_id = current_id;
+      current_id = next_id;
+      continue;
+    }
+
+    if((void*)next_id > heap_end) next_id == nullptr;
 
     char* prev_payload = (char*)prev_id + sizeof(memID);
 
-    prev_payload = &current_id;
+    *(memID**)prev_payload = current_id;
 
     prev_id = current_id;
-    current_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
+    current_id = next_id;
+  }
+
+  if (prev_id)
+  {
+      char* payload = (char*)prev_id + sizeof(memID);
+      *(memID**)payload = nullptr;
   }
 }
 
