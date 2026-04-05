@@ -190,6 +190,37 @@ void mark_algo()
   }
 }
 
+void sweep_algo()
+{
+  memID* prev_id = nullptr;
+  memID* current_id = (memID*)heap_start;
+  
+  while((void*)current_id < heap_end)
+  {
+    memID* next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
+
+    if(current_id->is_free || current_id->is_marked) 
+    {
+      current_id->is_marked = 0;
+      current_id = next_id;
+      continue;
+    }
+
+    current_id->is_marked = 0;
+    current_id->is_free = 1;
+
+    if(next_id->is_free) current_id->size += next_id->size;
+    if(prev_id == nullptr) free_list_head = current_id; continue;
+
+    char* prev_payload = (char*)prev_id + sizeof(memID);
+
+    prev_payload = &current_id;
+
+    prev_id = current_id;
+    current_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
+  }
+}
+
 int main()
 {
   char* ptr = m_allocate(425);
