@@ -15,7 +15,7 @@ typedef struct memID
 
 memID* free_list_head = (memID*)heap_ptr;
 void* heap_start = (void*)heap_ptr;
-void* heap_end = (void*)(heap_start + 65536);
+void* heap_end = (void*)((char*)heap_start + 65536);
 static int called = 0;
 
 char* m_allocate(size_t size)
@@ -28,11 +28,11 @@ char* m_allocate(size_t size)
   memID* current;
   memID* next_free;
 
+  prev = nullptr;
+  current = free_list_head;
 
   if (!called) {
 
-    prev = nullptr;
-    current = free_list_head;
     
     payload = (char*)free_list_head + sizeof(memID);
 
@@ -43,7 +43,7 @@ char* m_allocate(size_t size)
     current->is_free = 0;
     current->size = size;
 
-    free_list_head = (memID*)((char*)free_list_head + sizeof(memID) + size);
+    free_list_head = (memID*)((char*)current + sizeof(memID) + size);
 
     free_list_head->is_free = 1;
     free_list_head->size = free_size - size - sizeof(memID);
@@ -55,11 +55,7 @@ char* m_allocate(size_t size)
     return (char*)current + sizeof(memID);
   }
 
-  current = free_list_head;
-  prev = nullptr;
-
-
-  while(current!= nullptr && current->size < size)
+  while(current!= nullptr && current->size < size && current->is_free)
   {
     prev = current;
     current = next_free;
@@ -106,19 +102,25 @@ char* m_allocate(size_t size)
   return (char*)current + sizeof(memID);
 }
 
+void coalesce(memID* id)
+{
+  while (true)
+  {
+    memID* next_id = (memID*)((char*)id + sizeof(memID) + id->size);
+
+    if ((void*)next_id >= heap_end || !next_id->is_free)
+        break;
+
+    id->size += sizeof(memID) + next_id->size;
+  }
+}
+
 void m_free(char* ptr)
 {
   memID *ptr_id = (memID*)(ptr - sizeof(memID));
-  memID *next_id = (memID*)(ptr + ptr_id->size + sizeof(memID));
+  memID *next_id = (memID*)(ptr + ptr_id->size);
 
-  ptr_id->is_free = 1;
-
-  if(next_id->is_free)
-  {
-    ptr_id->size = ptr_id->size + next_id->size + sizeof(memID);
-    return;
-  }
-
+  ptr_id->is_free = 1;  
 }
 
 void get_stack_bounds(void **stack_top)
@@ -178,6 +180,7 @@ void mark_algo()
   void* stack_top;
   get_stack_bounds(&stack_top);
 
+
   for(void** sp = (void**)current_sp; sp < (void**)stack_top; ++sp)
   {
     if(looks_like_pointer(*sp))
@@ -188,17 +191,9 @@ void mark_algo()
       traverse_mark(ptr_id);      
     }
   }
+
 }
 
-void coalasce(memID* id)
-{
-  next_id = (memID*)((char*)id + id->size + sizeof(size));
-  if((void*)next_id < heap_end && next_id->is_free)
-  {
-    id->size = id->size + next_id->size + sizeof(memID);
-    coalasce(id);
-  }
-}
 
 void sweep_algo()
 {
@@ -206,13 +201,32 @@ void sweep_algo()
   memID* current_id = (memID*)heap_start;
   free_list_head = nullptr;
   
+  std::cout<<"Before the sweep loop"<<std::endl;
   while((void*)current_id < heap_end)
   {
-    memID* next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
 
-    if(current_id->is_free || current_id->is_marked) 
+    memID* next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
+    if(current_id->is_free)
+    {
+      coalesce(current_id);
+
+      current_id->is_marked = 0;
+      next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
+
+      if(prev_id)
+      {
+        char* prev_payload = (char*)prev_id + sizeof(memID);
+        *(memID**)prev_payload = current_id;
+      }
+
+      current_id = next_id;
+      continue;
+    }
+
+    if(current_id->is_marked)
     {
       current_id->is_marked = 0;
+      next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
       current_id = next_id;
       continue;
     }
@@ -220,7 +234,8 @@ void sweep_algo()
     current_id->is_marked = 0;
     current_id->is_free = 1;
 
-    coalasce(current_id);
+    coalesce(current_id);
+    next_id = (memID*)((char*)current_id + sizeof(memID) + current_id->size);
 
     if(prev_id == nullptr) 
     {
@@ -231,8 +246,6 @@ void sweep_algo()
       continue;
     }
 
-    if((void*)next_id > heap_end) next_id == nullptr;
-
     char* prev_payload = (char*)prev_id + sizeof(memID);
 
     *(memID**)prev_payload = current_id;
@@ -240,12 +253,17 @@ void sweep_algo()
     prev_id = current_id;
     current_id = next_id;
   }
+  
+  std::cout<<"After the sweep loop"<<std::endl;
 
+  std::cout<<"Setting payload to nullptr"<<std::endl;
   if (prev_id)
   {
       char* payload = (char*)prev_id + sizeof(memID);
       *(memID**)payload = nullptr;
   }
+
+  std::cout<<"Setting payload to nullptr"<<std::endl;
 }
 
 int main()
@@ -254,13 +272,17 @@ int main()
   char* ptr2 = m_allocate(300);
 
   char x = 'A';
-  ptr = &x;
+  *ptr = x;
 
   char y = 'B';
-  ptr2 = &y;
+  *ptr2 = y;
+  
+  mark_algo();
+  sweep_algo();
 
+  std::cout<<"BEFORE FREEING POINTER"<<std::endl;
   m_free(ptr);
-
+  std::cout<<"AFTER FREEING POINTER"<<std::endl;
   std::cout<<"SUCESSFULLY ALLOCATED MEMORY "<<"\nVALUE OF VARIABLE IS "<<*ptr<<" AND y = "<<*ptr2<<std::endl;
   return 0; 
 }
